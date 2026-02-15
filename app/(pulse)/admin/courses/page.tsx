@@ -372,10 +372,10 @@ function CatalogueCardView({ courses }: { courses: Course[] }) {
 
             <CardFooter className="gap-2">
               <Button variant="secondary" size="sm" asChild>
-                <Link href={`/admin/classes?course=${encodeURIComponent(c.id)}`}>Open classes</Link>
+                <Link href={`/admin/courses/${encodeURIComponent(c.id)}`}>Manage Course</Link>
               </Button>
-              <Button variant="outline" size="sm">
-                Duplicate
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/admin/classes?course=${encodeURIComponent(c.id)}`}>View Classes</Link>
               </Button>
             </CardFooter>
           </Card>
@@ -431,9 +431,11 @@ function CatalogueTableView({ courses }: { courses: Course[] }) {
                   </div>
                 </TableCell>
                 <TableCell>
-                  <Button variant="secondary" size="sm" asChild>
-                    <Link href={`/admin/classes?course=${encodeURIComponent(c.id)}`}>View</Link>
-                  </Button>
+                  <div className="flex gap-1">
+                    <Button variant="secondary" size="sm" asChild>
+                      <Link href={`/admin/courses/${encodeURIComponent(c.id)}`}>Manage</Link>
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))
