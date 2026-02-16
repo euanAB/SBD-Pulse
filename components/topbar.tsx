@@ -1,8 +1,8 @@
 "use client"
-import { Bell, Search, User } from "lucide-react"
+import { Bell, User } from "lucide-react"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { GlobalSearch } from "@/components/global-search"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,12 +14,11 @@ import {
 
 export function Topbar() {
   return (
-    <header className="sticky top-0 z-10 -mt-2 md:-mt-0 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <header className="sticky top-0 z-30 -mt-2 md:-mt-0 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="flex items-center gap-2 border-b px-3 py-2 md:px-6 md:py-3">
         <SidebarTrigger />
-        <div className="relative ml-1 flex-1">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search students, classes, courses..." className="pl-8" aria-label="Global search" />
+        <div className="ml-1 flex-1">
+          <GlobalSearch />
         </div>
         <Button variant="ghost" size="icon" aria-label="Notifications">
           <Bell className="h-5 w-5" />
