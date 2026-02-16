@@ -91,6 +91,8 @@ type AvailableStudent = {
   previousCourses: number
 }
 
+type InvoiceTag = "teaching-delivery" | "allowed-expenses" | "additional-expenses"
+
 type ClassInvoice = {
   id: string
   educatorName: string
@@ -99,6 +101,7 @@ type ClassInvoice = {
   uploadDate: string
   status: InvoiceStatus
   filename: string
+  tag: InvoiceTag
   notes?: string
   rejectedReason?: string
   reAcceptedDate?: string
@@ -111,6 +114,7 @@ type ClassExpense = {
   amount: number
   category: string
   receipt?: string
+  receiptFile?: File
   submittedBy: string
   status: ExpenseStatus
   approvedBy?: string
@@ -199,9 +203,9 @@ const mockAvailableStudents: AvailableStudent[] = [
 ]
 
 const mockInvoices: ClassInvoice[] = [
-  { id: "INV-001", educatorName: "Alex Taylor", amount: 650, description: "Teaching services - First Aid Level 1", uploadDate: "2025-01-12", status: "approved", filename: "invoice-alex-taylor-jan2025.pdf", notes: "Standard teaching fee as per contract" },
-  { id: "INV-002", educatorName: "Alex Taylor", amount: 75, description: "Additional session preparation", uploadDate: "2025-01-10", status: "pending", filename: "invoice-prep-work.pdf" },
-  { id: "INV-003", educatorName: "Alex Taylor", amount: 120, description: "Travel expenses reimbursement", uploadDate: "2025-01-08", status: "rejected", filename: "invoice-travel.pdf", rejectedReason: "Missing receipts - please resubmit with documentation" },
+  { id: "INV-001", educatorName: "Alex Taylor", amount: 650, description: "Teaching services - First Aid Level 1", uploadDate: "2025-01-12", status: "approved", filename: "invoice-alex-taylor-jan2025.pdf", tag: "teaching-delivery", notes: "Standard teaching fee as per contract" },
+  { id: "INV-002", educatorName: "Alex Taylor", amount: 75, description: "Additional session preparation", uploadDate: "2025-01-10", status: "pending", filename: "invoice-prep-work.pdf", tag: "allowed-expenses" },
+  { id: "INV-003", educatorName: "Alex Taylor", amount: 120, description: "Travel expenses reimbursement", uploadDate: "2025-01-08", status: "rejected", filename: "invoice-travel.pdf", tag: "additional-expenses", rejectedReason: "Missing receipts - please resubmit with documentation" },
 ]
 
 const mockExpenses: ClassExpense[] = [
@@ -291,7 +295,7 @@ export default function ClassDetailPage({ params }: { params: { id: string } }) 
   // Form states
   const [bulkEmailForm, setBulkEmailForm] = React.useState({ subject: "", message: "" })
   const [bulkSMSForm, setBulkSMSForm] = React.useState({ message: "" })
-  const [expenseForm, setExpenseForm] = React.useState({ description: "", amount: "", category: "", date: new Date().toISOString().split("T")[0] })
+  const [expenseForm, setExpenseForm] = React.useState({ description: "", amount: "", category: "", date: new Date().toISOString().split("T")[0], receiptFile: null as File | null })
   const [assessmentForm, setAssessmentForm] = React.useState({ name: "", weight: "", passRate: "" })
   const [reAcceptReason, setReAcceptReason] = React.useState("")
 
@@ -421,9 +425,10 @@ export default function ClassDetailPage({ params }: { params: { id: string } }) 
     const ne: ClassExpense = {
       id: `EXP-${Date.now()}`, date: expenseForm.date, description: expenseForm.description,
       amount: Number(expenseForm.amount), category: expenseForm.category, submittedBy: "Admin", status: "pending",
+      receipt: expenseForm.receiptFile ? expenseForm.receiptFile.name : undefined,
     }
     setExpenses([ne, ...expenses])
-    setExpenseForm({ description: "", amount: "", category: "", date: new Date().toISOString().split("T")[0] })
+    setExpenseForm({ description: "", amount: "", category: "", date: new Date().toISOString().split("T")[0], receiptFile: null })
     setShowAddExpenseModal(false)
     toast({ title: "Expense added", description: "Expense submitted for approval" })
   }
@@ -939,6 +944,42 @@ export default function ClassDetailPage({ params }: { params: { id: string } }) 
         {/* ============ FINANCES TAB — comprehensive income & loss ============ */}
         <TabsContent value="finances" className="space-y-4">
 
+          {/* Expense Allowance Tracker (admin-only) */}
+          {(() => {
+            const expenseAllowance = 195
+            const allowedExpenseInvoices = invoices.filter((i) => i.tag === "allowed-expenses" && (i.status === "approved" || i.status === "paid"))
+            const spentOnAllowance = allowedExpenseInvoices.reduce((sum, i) => sum + i.amount, 0)
+            const remainingAllowance = expenseAllowance - spentOnAllowance
+            const pct = Math.min((spentOnAllowance / expenseAllowance) * 100, 100)
+            return (
+              <Card className="border-dashed">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base flex items-center gap-2"><Shield className="h-4 w-4 text-muted-foreground" /> Approved Expense Allowance (Admin View)</CardTitle>
+                    <Badge variant={remainingAllowance > 0 ? "secondary" : "destructive"}>{remainingAllowance > 0 ? `${"\u00A3"}${remainingAllowance.toFixed(2)} remaining` : "Allowance spent"}</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Budget: {"\u00A3"}{expenseAllowance.toFixed(2)}</span>
+                    <span className="text-muted-foreground">Spent: {"\u00A3"}{spentOnAllowance.toFixed(2)}</span>
+                  </div>
+                  <div className="w-full bg-muted rounded-full h-3">
+                    <div className={`h-3 rounded-full transition-all ${pct >= 100 ? "bg-red-500" : pct >= 75 ? "bg-orange-500" : "bg-green-500"}`} style={{ width: `${pct}%` }} />
+                  </div>
+                  <p className="text-xs text-muted-foreground">Invoices tagged &quot;Allowed Expenses&quot; are deducted from this allowance. This is an approved cap, not necessarily spent.</p>
+                  {allowedExpenseInvoices.length > 0 && (
+                    <div className="border-t pt-2 space-y-1">
+                      {allowedExpenseInvoices.map((i) => (
+                        <div key={i.id} className="flex justify-between text-sm"><span>{i.description}</span><span className="tabular-nums font-medium">{"\u00A3"}{i.amount.toFixed(2)}</span></div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )
+          })()}
+
           {/* Income & Loss Summary */}
           <Card>
             <CardHeader><CardTitle>Income & Loss Overview</CardTitle></CardHeader>
@@ -948,18 +989,18 @@ export default function ClassDetailPage({ params }: { params: { id: string } }) 
                 <div className="space-y-4">
                   <h4 className="font-semibold text-green-700 flex items-center gap-2"><TrendingUp className="h-4 w-4" /> Income</h4>
                   <div className="space-y-2">
-                    <div className="flex justify-between text-sm"><span>Student fees collected</span><span className="font-medium tabular-nums text-green-600">{"£"}{actualRevenue.toFixed(2)}</span></div>
-                    <div className="flex justify-between text-sm"><span>Expected total revenue</span><span className="font-medium tabular-nums">{"£"}{expectedRevenue.toFixed(2)}</span></div>
-                    <div className="flex justify-between text-sm"><span>Outstanding fees</span><span className="font-medium tabular-nums text-orange-600">{"£"}{outstandingPayments.toFixed(2)}</span></div>
+                    <div className="flex justify-between text-sm"><span>Student fees collected</span><span className="font-medium tabular-nums text-green-600">{"\u00A3"}{actualRevenue.toFixed(2)}</span></div>
+                    <div className="flex justify-between text-sm"><span>Expected total revenue</span><span className="font-medium tabular-nums">{"\u00A3"}{expectedRevenue.toFixed(2)}</span></div>
+                    <div className="flex justify-between text-sm"><span>Outstanding fees</span><span className="font-medium tabular-nums text-orange-600">{"\u00A3"}{outstandingPayments.toFixed(2)}</span></div>
                     <div className="flex justify-between text-sm"><span>Collection rate</span><span className="font-medium tabular-nums">{expectedRevenue > 0 ? ((actualRevenue / expectedRevenue) * 100).toFixed(1) : 0}%</span></div>
                   </div>
                   <div className="border-t pt-3 space-y-1">
                     <h5 className="text-sm font-medium text-muted-foreground">Per Student Breakdown</h5>
                     {students.map((s) => (
                       <div key={s.id} className="flex justify-between text-sm">
-                        <span>{s.name}</span>
+                        <span>{s.name} <span className="text-muted-foreground">({s.id})</span></span>
                         <div className="flex items-center gap-2">
-                          <span className="tabular-nums">{"£"}{s.amountPaid} / {"£"}{s.courseFee}</span>
+                          <span className="tabular-nums">{"\u00A3"}{s.amountPaid} / {"\u00A3"}{s.courseFee}</span>
                           <Badge variant={s.paymentStatus === "paid" ? "default" : s.paymentStatus === "partial" ? "secondary" : "destructive"} className="text-xs">{s.paymentStatus}</Badge>
                         </div>
                       </div>
@@ -971,14 +1012,17 @@ export default function ClassDetailPage({ params }: { params: { id: string } }) 
                 <div className="space-y-4">
                   <h4 className="font-semibold text-red-700 flex items-center gap-2"><TrendingDown className="h-4 w-4" /> Costs & Outgoings</h4>
                   <div className="space-y-2">
-                    <div className="flex justify-between text-sm"><span>Educator invoices (approved)</span><span className="font-medium tabular-nums text-red-600">{"£"}{totalApprovedInvoices.toFixed(2)}</span></div>
-                    <div className="flex justify-between text-sm"><span>Class expenses (approved)</span><span className="font-medium tabular-nums text-red-600">{"£"}{totalApprovedExpenses.toFixed(2)}</span></div>
-                    <div className="flex justify-between text-sm"><span>Total paid out</span><span className="font-medium tabular-nums">{"£"}{totalPaidOut.toFixed(2)}</span></div>
-                    <div className="flex justify-between text-sm"><span>Pending payment</span><span className="font-medium tabular-nums text-orange-600">{"£"}{totalPendingOut.toFixed(2)}</span></div>
+                    {/* Breakdown by invoice tag */}
+                    <div className="flex justify-between text-sm"><span>Teaching & Delivery</span><span className="font-medium tabular-nums text-red-600">{"\u00A3"}{invoices.filter((i) => i.tag === "teaching-delivery" && (i.status === "approved" || i.status === "paid")).reduce((s, i) => s + i.amount, 0).toFixed(2)}</span></div>
+                    <div className="flex justify-between text-sm"><span>Allowed Expenses (invoices)</span><span className="font-medium tabular-nums text-red-600">{"\u00A3"}{invoices.filter((i) => i.tag === "allowed-expenses" && (i.status === "approved" || i.status === "paid")).reduce((s, i) => s + i.amount, 0).toFixed(2)}</span></div>
+                    <div className="flex justify-between text-sm"><span>Additional Expenses (invoices)</span><span className="font-medium tabular-nums text-red-600">{"\u00A3"}{invoices.filter((i) => i.tag === "additional-expenses" && (i.status === "approved" || i.status === "paid")).reduce((s, i) => s + i.amount, 0).toFixed(2)}</span></div>
+                    <div className="flex justify-between text-sm"><span>Class expenses (approved)</span><span className="font-medium tabular-nums text-red-600">{"\u00A3"}{totalApprovedExpenses.toFixed(2)}</span></div>
+                    <div className="border-t pt-2 flex justify-between text-sm"><span>Total paid out</span><span className="font-medium tabular-nums">{"\u00A3"}{totalPaidOut.toFixed(2)}</span></div>
+                    <div className="flex justify-between text-sm"><span>Pending payment</span><span className="font-medium tabular-nums text-orange-600">{"\u00A3"}{totalPendingOut.toFixed(2)}</span></div>
                   </div>
                   <div className="border-t pt-3 space-y-2">
-                    <div className="flex justify-between font-semibold"><span>Current Profit</span><span className={`tabular-nums ${currentProfit >= 0 ? "text-green-600" : "text-red-600"}`}>{"£"}{currentProfit.toFixed(2)}</span></div>
-                    <div className="flex justify-between text-sm"><span>Projected Profit (all fees collected)</span><span className="tabular-nums font-medium">{"£"}{projectedProfit.toFixed(2)}</span></div>
+                    <div className="flex justify-between font-semibold"><span>Current Profit</span><span className={`tabular-nums ${currentProfit >= 0 ? "text-green-600" : "text-red-600"}`}>{"\u00A3"}{currentProfit.toFixed(2)}</span></div>
+                    <div className="flex justify-between text-sm"><span>Projected Profit (all fees collected)</span><span className="tabular-nums font-medium">{"\u00A3"}{projectedProfit.toFixed(2)}</span></div>
                     <div className="flex justify-between text-sm"><span>Profit Margin (current)</span><span className="tabular-nums font-medium">{actualRevenue > 0 ? ((currentProfit / actualRevenue) * 100).toFixed(1) : 0}%</span></div>
                     <div className="flex justify-between text-sm"><span>Profit Margin (projected)</span><span className="tabular-nums font-medium">{expectedRevenue > 0 ? ((projectedProfit / expectedRevenue) * 100).toFixed(1) : 0}%</span></div>
                   </div>
@@ -987,14 +1031,87 @@ export default function ClassDetailPage({ params }: { params: { id: string } }) 
             </CardContent>
           </Card>
 
-          {/* Invoices with re-accept */}
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle>Educator Invoices</CardTitle>
-                  <Select value={invoiceFilter} onValueChange={setInvoiceFilter}>
-                    <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+          {/* Invoices with tags and re-accept */}
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <CardTitle>Educator Invoices</CardTitle>
+                <Select value={invoiceFilter} onValueChange={setInvoiceFilter}>
+                  <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Show All</SelectItem>
+                    <SelectItem value="paid">Paid</SelectItem>
+                    <SelectItem value="approved">Approved</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="rejected">Rejected</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Invoice</TableHead>
+                    <TableHead>Tag</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredInvoices.map((inv) => (
+                    <TableRow key={inv.id}>
+                      <TableCell>
+                        <div className="space-y-0.5">
+                          <div className="font-medium">{inv.description}</div>
+                          <div className="text-xs text-muted-foreground">{inv.educatorName} &bull; {inv.filename}</div>
+                          {inv.notes && <div className="text-xs text-muted-foreground">{inv.notes}</div>}
+                          {inv.rejectedReason && <div className="text-xs text-red-600 flex items-center gap-1"><AlertTriangle className="h-3 w-3" />{inv.rejectedReason}</div>}
+                          {inv.reAcceptedDate && <div className="text-xs text-green-600 flex items-center gap-1"><RotateCcw className="h-3 w-3" />Re-accepted {inv.reAcceptedDate}</div>}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={`text-xs whitespace-nowrap ${inv.tag === "teaching-delivery" ? "border-blue-300 text-blue-700" : inv.tag === "allowed-expenses" ? "border-green-300 text-green-700" : "border-orange-300 text-orange-700"}`}>
+                          {inv.tag === "teaching-delivery" ? "Teaching & Delivery" : inv.tag === "allowed-expenses" ? "Allowed Expenses" : "Additional Expenses"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-medium tabular-nums">{"\u00A3"}{inv.amount.toFixed(2)}</TableCell>
+                      <TableCell><Badge variant={inv.status === "paid" ? "default" : inv.status === "approved" ? "secondary" : inv.status === "rejected" ? "destructive" : "outline"}>{inv.status}</Badge></TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{new Date(inv.uploadDate).toLocaleDateString("en-GB")}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Button variant="ghost" size="sm"><Eye className="h-4 w-4" /></Button>
+                          {inv.status === "pending" && (
+                            <>
+                              <Button size="sm" variant="outline" onClick={() => updateInvoiceStatus(inv.id, "approved")}><Check className="h-3 w-3" /></Button>
+                              <Button size="sm" variant="outline" onClick={() => updateInvoiceStatus(inv.id, "rejected")}><X className="h-3 w-3" /></Button>
+                            </>
+                          )}
+                          {inv.status === "approved" && <Button size="sm" onClick={() => updateInvoiceStatus(inv.id, "paid")}>Mark Paid</Button>}
+                          {inv.status === "rejected" && (
+                            <Button size="sm" variant="outline" className="gap-1" onClick={() => setShowReAcceptModal(inv.id)}>
+                              <RotateCcw className="h-3 w-3" />Re-accept
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
+          {/* Expenses with receipt indicator */}
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <CardTitle>Class Expenses</CardTitle>
+                <div className="flex items-center gap-2">
+                  <Select value={expenseFilter} onValueChange={setExpenseFilter}>
+                    <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Show All</SelectItem>
                       <SelectItem value="paid">Paid</SelectItem>
@@ -1003,86 +1120,124 @@ export default function ClassDetailPage({ params }: { params: { id: string } }) 
                       <SelectItem value="rejected">Rejected</SelectItem>
                     </SelectContent>
                   </Select>
+                  <Button size="sm" onClick={() => setShowAddExpenseModal(true)}><Plus className="mr-2 h-4 w-4" />Add Expense</Button>
                 </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {filteredInvoices.map((inv) => (
-                  <div key={inv.id} className="flex items-start justify-between p-3 border rounded-lg">
-                    <div className="space-y-1">
-                      <div className="font-medium">{inv.description}</div>
-                      <div className="text-sm text-muted-foreground">{inv.educatorName} &bull; {new Date(inv.uploadDate).toLocaleDateString("en-GB")}</div>
-                      <div className="text-sm text-muted-foreground">{inv.filename}</div>
-                      {inv.notes && <div className="text-xs text-muted-foreground">{inv.notes}</div>}
-                      {inv.rejectedReason && <div className="text-xs text-red-600 flex items-center gap-1"><AlertTriangle className="h-3 w-3" />{inv.rejectedReason}</div>}
-                      {inv.reAcceptedDate && <div className="text-xs text-green-600 flex items-center gap-1"><RotateCcw className="h-3 w-3" />Re-accepted on {inv.reAcceptedDate}</div>}
-                    </div>
-                    <div className="text-right space-y-2 shrink-0 ml-4">
-                      <div className="font-medium tabular-nums">{"£"}{inv.amount.toFixed(2)}</div>
-                      <Badge variant={inv.status === "paid" ? "default" : inv.status === "approved" ? "secondary" : inv.status === "rejected" ? "destructive" : "outline"}>{inv.status}</Badge>
-                      {inv.status === "pending" && (
-                        <div className="flex gap-1">
-                          <Button size="sm" variant="outline" onClick={() => updateInvoiceStatus(inv.id, "approved")}><Check className="h-3 w-3" /></Button>
-                          <Button size="sm" variant="outline" onClick={() => updateInvoiceStatus(inv.id, "rejected")}><X className="h-3 w-3" /></Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Expense</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Receipt</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredExpenses.map((exp) => (
+                    <TableRow key={exp.id}>
+                      <TableCell>
+                        <div className="space-y-0.5">
+                          <div className="font-medium">{exp.description}</div>
+                          <div className="text-xs text-muted-foreground">By {exp.submittedBy}</div>
+                          {exp.approvedBy && <div className="text-xs text-muted-foreground">Approved: {exp.approvedBy} ({exp.approvedDate})</div>}
                         </div>
-                      )}
-                      {inv.status === "approved" && <Button size="sm" onClick={() => updateInvoiceStatus(inv.id, "paid")}>Mark Paid</Button>}
-                      {inv.status === "rejected" && (
-                        <Button size="sm" variant="outline" className="gap-1" onClick={() => setShowReAcceptModal(inv.id)}>
-                          <RotateCcw className="h-3 w-3" />Re-accept
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
+                      </TableCell>
+                      <TableCell><Badge variant="outline" className="text-xs">{exp.category}</Badge></TableCell>
+                      <TableCell className="text-right font-medium tabular-nums">{"\u00A3"}{exp.amount.toFixed(2)}</TableCell>
+                      <TableCell><Badge variant={exp.status === "paid" ? "default" : exp.status === "approved" ? "secondary" : exp.status === "rejected" ? "destructive" : "outline"}>{exp.status}</Badge></TableCell>
+                      <TableCell>
+                        {exp.receipt ? (
+                          <Button variant="ghost" size="sm" className="gap-1 text-xs"><Receipt className="h-3 w-3" />{exp.receipt}</Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">None</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{new Date(exp.date).toLocaleDateString("en-GB")}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          {exp.status === "pending" && (
+                            <>
+                              <Button size="sm" variant="outline" onClick={() => updateExpenseStatus(exp.id, "approved")}><Check className="h-3 w-3" /></Button>
+                              <Button size="sm" variant="outline" onClick={() => updateExpenseStatus(exp.id, "rejected")}><X className="h-3 w-3" /></Button>
+                            </>
+                          )}
+                          {exp.status === "approved" && <Button size="sm" onClick={() => updateExpenseStatus(exp.id, "paid")}>Mark Paid</Button>}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
 
-            {/* Expenses */}
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle>Class Expenses</CardTitle>
-                  <div className="flex items-center gap-2">
-                    <Select value={expenseFilter} onValueChange={setExpenseFilter}>
-                      <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Show All</SelectItem>
-                        <SelectItem value="paid">Paid</SelectItem>
-                        <SelectItem value="approved">Approved</SelectItem>
-                        <SelectItem value="pending">Pending</SelectItem>
-                        <SelectItem value="rejected">Rejected</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Button size="sm" onClick={() => setShowAddExpenseModal(true)}><Plus className="mr-2 h-4 w-4" />Add Expense</Button>
-                  </div>
+          {/* Downloadable Income & Cost Report */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2"><FileText className="h-5 w-5" /> Downloadable Cost & Income Report</CardTitle>
+                <Button variant="outline" size="sm" onClick={() => {
+                  const lines: string[] = []
+                  lines.push(`Class Financial Report: ${classId}`)
+                  lines.push(`Course: First Aid Level 1 - Morning Session`)
+                  lines.push(`Report date: ${new Date().toLocaleDateString("en-GB")}`)
+                  lines.push(`Period: Jan 15, 2025 - Feb 05, 2025`)
+                  lines.push("")
+                  lines.push("=== INCOME ===")
+                  lines.push(`Student,ID,Course Fee,Amount Paid,Status`)
+                  students.forEach((s) => lines.push(`${s.name},${s.id},${s.courseFee.toFixed(2)},${s.amountPaid.toFixed(2)},${s.paymentStatus}`))
+                  lines.push("")
+                  lines.push(`Total Expected Revenue,${expectedRevenue.toFixed(2)}`)
+                  lines.push(`Total Collected,${actualRevenue.toFixed(2)}`)
+                  lines.push(`Outstanding,${outstandingPayments.toFixed(2)}`)
+                  lines.push(`Collection Rate,${expectedRevenue > 0 ? ((actualRevenue / expectedRevenue) * 100).toFixed(1) : 0}%`)
+                  lines.push("")
+                  lines.push("=== COSTS - INVOICES ===")
+                  lines.push("ID,Description,Educator,Amount,Tag,Status,Date")
+                  invoices.forEach((i) => lines.push(`${i.id},${i.description},${i.educatorName},${i.amount.toFixed(2)},${i.tag},${i.status},${i.uploadDate}`))
+                  lines.push("")
+                  lines.push("=== COSTS - EXPENSES ===")
+                  lines.push("ID,Description,Category,Amount,Status,Receipt,Date")
+                  expenses.forEach((e) => lines.push(`${e.id},${e.description},${e.category},${e.amount.toFixed(2)},${e.status},${e.receipt || "None"},${e.date}`))
+                  lines.push("")
+                  lines.push("=== SUMMARY ===")
+                  lines.push(`Total Invoice Costs (approved),${totalApprovedInvoices.toFixed(2)}`)
+                  lines.push(`Total Expense Costs (approved),${totalApprovedExpenses.toFixed(2)}`)
+                  lines.push(`Total Costs,${totalCosts.toFixed(2)}`)
+                  lines.push(`Total Paid Out,${totalPaidOut.toFixed(2)}`)
+                  lines.push(`Pending Payment,${totalPendingOut.toFixed(2)}`)
+                  lines.push(`Current Profit,${currentProfit.toFixed(2)}`)
+                  lines.push(`Projected Profit,${projectedProfit.toFixed(2)}`)
+                  lines.push(`Profit Margin (current),${actualRevenue > 0 ? ((currentProfit / actualRevenue) * 100).toFixed(1) : 0}%`)
+                  lines.push(`Profit Margin (projected),${expectedRevenue > 0 ? ((projectedProfit / expectedRevenue) * 100).toFixed(1) : 0}%`)
+                  const blob = new Blob([lines.join("\n")], { type: "text/csv" })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement("a")
+                  a.href = url
+                  a.download = `class-${classId}-financial-report.csv`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                  toast({ title: "Report downloaded", description: "CSV financial report has been generated" })
+                }}><Download className="mr-2 h-4 w-4" />Download CSV Report</Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-lg border p-4 bg-muted/30 space-y-3">
+                <p className="text-sm text-muted-foreground">The report includes a full income breakdown by student (name, ID, fee, paid, status), all invoices tagged by type (Teaching & Delivery, Allowed Expenses, Additional Expenses), all class expenses with categories and receipt status, and a complete profit & loss summary. It is formatted as CSV for import into Excel, Google Sheets, or accounting software.</p>
+                <div className="grid gap-4 md:grid-cols-4">
+                  <div className="space-y-0.5"><p className="text-xs text-muted-foreground">Total Income</p><p className="font-semibold tabular-nums text-green-600">{"\u00A3"}{actualRevenue.toFixed(2)}</p></div>
+                  <div className="space-y-0.5"><p className="text-xs text-muted-foreground">Total Costs</p><p className="font-semibold tabular-nums text-red-600">{"\u00A3"}{totalCosts.toFixed(2)}</p></div>
+                  <div className="space-y-0.5"><p className="text-xs text-muted-foreground">Net Profit</p><p className={`font-semibold tabular-nums ${currentProfit >= 0 ? "text-green-600" : "text-red-600"}`}>{"\u00A3"}{currentProfit.toFixed(2)}</p></div>
+                  <div className="space-y-0.5"><p className="text-xs text-muted-foreground">Margin</p><p className="font-semibold tabular-nums">{actualRevenue > 0 ? ((currentProfit / actualRevenue) * 100).toFixed(1) : 0}%</p></div>
                 </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {filteredExpenses.map((exp) => (
-                  <div key={exp.id} className="flex items-start justify-between p-3 border rounded-lg">
-                    <div className="space-y-1">
-                      <div className="font-medium">{exp.description}</div>
-                      <div className="text-sm text-muted-foreground">{exp.category} &bull; {new Date(exp.date).toLocaleDateString("en-GB")}</div>
-                      <div className="text-xs text-muted-foreground">By {exp.submittedBy}</div>
-                      {exp.approvedBy && <div className="text-xs text-muted-foreground">Approved by {exp.approvedBy} on {exp.approvedDate}</div>}
-                    </div>
-                    <div className="text-right space-y-2 shrink-0 ml-4">
-                      <div className="font-medium tabular-nums">{"£"}{exp.amount.toFixed(2)}</div>
-                      <Badge variant={exp.status === "paid" ? "default" : exp.status === "approved" ? "secondary" : exp.status === "rejected" ? "destructive" : "outline"}>{exp.status}</Badge>
-                      {exp.status === "pending" && (
-                        <div className="flex gap-1">
-                          <Button size="sm" variant="outline" onClick={() => updateExpenseStatus(exp.id, "approved")}><Check className="h-3 w-3" /></Button>
-                          <Button size="sm" variant="outline" onClick={() => updateExpenseStatus(exp.id, "rejected")}><X className="h-3 w-3" /></Button>
-                        </div>
-                      )}
-                      {exp.status === "approved" && <Button size="sm" onClick={() => updateExpenseStatus(exp.id, "paid")}>Mark Paid</Button>}
-                      {exp.receipt && <Button variant="ghost" size="sm" className="h-6 px-2"><Receipt className="h-3 w-3" /></Button>}
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          </div>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* ============ ER AGREEMENT TAB ============ */}
@@ -1273,7 +1428,7 @@ export default function ClassDetailPage({ params }: { params: { id: string } }) 
           <div className="space-y-4">
             <div className="space-y-2"><Label>Description</Label><Input value={expenseForm.description} onChange={(e) => setExpenseForm((p) => ({ ...p, description: e.target.value }))} placeholder="Expense description..." /></div>
             <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2"><Label>{"Amount (£)"}</Label><Input type="number" step="0.01" min="0" value={expenseForm.amount} onChange={(e) => setExpenseForm((p) => ({ ...p, amount: e.target.value }))} placeholder="0.00" /></div>
+              <div className="space-y-2"><Label>{"Amount (\u00A3)"}</Label><Input type="number" step="0.01" min="0" value={expenseForm.amount} onChange={(e) => setExpenseForm((p) => ({ ...p, amount: e.target.value }))} placeholder="0.00" /></div>
               <div className="space-y-2">
                 <Label>Category</Label>
                 <Select value={expenseForm.category} onValueChange={(v) => setExpenseForm((p) => ({ ...p, category: v }))}>
@@ -1290,6 +1445,27 @@ export default function ClassDetailPage({ params }: { params: { id: string } }) 
               </div>
             </div>
             <div className="space-y-2"><Label>Date</Label><Input type="date" value={expenseForm.date} onChange={(e) => setExpenseForm((p) => ({ ...p, date: e.target.value }))} /></div>
+            <div className="space-y-2">
+              <Label>Upload Receipt</Label>
+              <div className="flex items-center gap-3">
+                <Input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null
+                    setExpenseForm((p) => ({ ...p, receiptFile: file }))
+                  }}
+                  className="text-sm"
+                />
+                {expenseForm.receiptFile && (
+                  <div className="flex items-center gap-1 text-xs text-green-600">
+                    <CheckCircle className="h-3 w-3" />
+                    <span>{expenseForm.receiptFile.name}</span>
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">Accepted: PDF, JPG, PNG, WebP</p>
+            </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setShowAddExpenseModal(false)}>Cancel</Button>
               <Button onClick={handleAddExpense}>Add Expense</Button>
